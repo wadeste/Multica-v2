@@ -1,0 +1,20 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: [self-hosted, staging]
+    concurrency:
+      group: staging
+      cancel-in-progress: false
+
+    steps:
+      - name: Deploy
+        run: |
+          cd ~/multica-staging
+          bash deploy-staging.sh
