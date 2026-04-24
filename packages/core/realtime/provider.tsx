@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { WSClient } from "../api/ws-client";
 import type { WSEventType, StorageAdapter } from "../types";
 import type { ClientIdentity } from "../platform/types";
@@ -114,6 +115,21 @@ export function WSProvider({
     identityVersion,
     identityOS,
   ]);
+
+  // Invalidate all queries when the tab regains visibility. This is the primary
+  // defence against half-open WebSocket connections (NAT timeout, laptop sleep)
+  // where the browser readyState stays OPEN but events have been lost. The WS
+  // dead-connection detector in WSClient is the secondary, deeper fix.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        queryClient.invalidateQueries();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [queryClient]);
 
   const stores: RealtimeSyncStores = { authStore };
 

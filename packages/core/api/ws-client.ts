@@ -13,6 +13,13 @@ export interface WSClientIdentity {
   os?: string;
 }
 
+// How long without any message before we treat the connection as half-open and
+// force a reconnect. Set to 1.5× the server's 54s heartbeat interval so that
+// one missed heartbeat does not trigger a false positive, but two in a row does.
+const DEAD_CONNECTION_THRESHOLD_MS = 90_000;
+// How often we check whether the threshold has been exceeded.
+const DEAD_CONNECTION_CHECK_INTERVAL_MS = 30_000;
+
 export class WSClient {
   private ws: WebSocket | null = null;
   private baseUrl: string;
@@ -26,6 +33,8 @@ export class WSClient {
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
+  private lastMessageTime = 0;
+  private deadConnectionTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     url: string,
@@ -75,9 +84,13 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
+      this.lastMessageTime = Date.now();
       const msg = JSON.parse(event.data as string) as WSMessage;
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
+        return;
+      }
+      if (msg.type === "heartbeat") {
         return;
       }
       this.logger.debug("received", msg.type);
@@ -105,6 +118,7 @@ export class WSClient {
 
   private onAuthenticated() {
     this.logger.info("connected");
+    this.startDeadConnectionDetector();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -117,7 +131,27 @@ export class WSClient {
     this.hasConnectedBefore = true;
   }
 
+  private startDeadConnectionDetector() {
+    if (this.deadConnectionTimer) {
+      clearInterval(this.deadConnectionTimer);
+    }
+    this.lastMessageTime = Date.now();
+    this.deadConnectionTimer = setInterval(() => {
+      if (
+        this.ws?.readyState === WebSocket.OPEN &&
+        Date.now() - this.lastMessageTime > DEAD_CONNECTION_THRESHOLD_MS
+      ) {
+        this.logger.warn("dead connection detected, forcing reconnect");
+        this.ws.close();
+      }
+    }, DEAD_CONNECTION_CHECK_INTERVAL_MS);
+  }
+
   disconnect() {
+    if (this.deadConnectionTimer) {
+      clearInterval(this.deadConnectionTimer);
+      this.deadConnectionTimer = null;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

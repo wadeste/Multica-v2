@@ -89,4 +89,10 @@ const (
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"
+
+	// Connection events (server -> web/desktop clients)
+	// Sent as a plain JSON text frame on the same interval as the native WS ping
+	// so JS clients can detect half-open connections without relying on the
+	// invisible ping/pong frames that browsers don't expose to JavaScript.
+	EventHeartbeat = "heartbeat"
 )

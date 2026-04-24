@@ -500,6 +500,13 @@ func (c *Client) writePump() {
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+			// Send an application-level heartbeat so JS clients can detect half-open
+			// connections. Browsers cannot observe native WS ping/pong frames, so they
+			// need a regular text message to confirm the connection is still live.
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"heartbeat"}`)); err != nil {
+				return
+			}
 		}
 	}
 }
