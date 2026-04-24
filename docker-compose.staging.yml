@@ -1,0 +1,16 @@
+# Staging network override — exposes backend and frontend on all LAN interfaces
+# so daemons running on other machines (e.g. MacBook) can reach the staging server.
+#
+# Usage (replaces docker-compose.selfhost.build.yml in staging deploys):
+#   docker compose -f docker-compose.selfhost.yml \
+#                  -f docker-compose.selfhost.build.yml \
+#                  -f docker-compose.staging.yml up -d
+
+services:
+  backend:
+    ports:
+      - "0.0.0.0:${PORT:-8090}:8080"
+
+  frontend:
+    ports:
+      - "0.0.0.0:${FRONTEND_PORT:-3220}:3000"
