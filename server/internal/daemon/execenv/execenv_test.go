@@ -747,6 +747,74 @@ func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigHermes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if err := InjectRuntimeConfig(dir, "hermes", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	// Hermes uses AGENTS.md.
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	// Hermes has no native skill discovery path wired up, so AGENTS.md must
+	// point the agent at the .agent_context/skills/ fallback — NOT claim that
+	// skills are "discovered automatically".
+	if strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Hermes should not claim native skill discovery")
+	}
+	if !strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Hermes should reference .agent_context/skills/ fallback path")
+	}
+
+	// CLAUDE.md should NOT exist.
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("expected CLAUDE.md to NOT exist for Hermes provider")
+	}
+}
+
+func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "hermes-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "hermes", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// Skills should be in the fallback .agent_context/skills/ path since
+	// Hermes has no native skills discovery directory.
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .agent_context/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+}
+
 func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
@@ -1284,4 +1352,77 @@ func TestReadGCMeta_NoFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
+}
+
+// TestInjectRuntimeConfigMentionLoopHardening locks in the mention-loop
+// instructions (see MUL-1323 / GH#1576). Two agents were stuck in an infinite
+// @mention loop because the harness told them mentions were "actions" but did
+// not tell them (a) when NOT to mention, (b) that silence ends a thread, or
+// (c) that the triggering comment was from another agent. If any of the
+// signals below regress, agent-to-agent loops come back.
+func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
+	t.Parallel()
+
+	commentTriggerCtx := TaskContextForEnv{
+		IssueID:          "issue-1",
+		TriggerCommentID: "comment-1",
+	}
+	assignmentCtx := TaskContextForEnv{IssueID: "issue-1"}
+
+	readClaudeMD := func(t *testing.T, ctx TaskContextForEnv) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig failed: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("read CLAUDE.md: %v", err)
+		}
+		return string(data)
+	}
+
+	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
+		t.Parallel()
+		s := readClaudeMD(t, assignmentCtx)
+		for _, want := range []string{
+			"side-effecting actions",
+			"enqueues a new run for that agent",
+			"When NOT to use a mention link",
+			"When a mention IS appropriate",
+			"end with no mention at all",
+			"Silence ends conversations",
+		} {
+			if !strings.Contains(s, want) {
+				t.Errorf("Mentions section missing %q\n---\n%s", want, s)
+			}
+		}
+	})
+
+	t.Run("closing-line-no-longer-says-always-mention", func(t *testing.T) {
+		t.Parallel()
+		s := readClaudeMD(t, assignmentCtx)
+		// The old footer said "**always** use the mention format" which models
+		// over-generalized to agent/member mentions. Guard against regression.
+		if strings.Contains(s, "**always** use the mention format") {
+			t.Errorf("CLAUDE.md still contains the overreaching \"**always** use the mention format\" guidance")
+		}
+	})
+
+	t.Run("workflow-carries-silence-as-exit-and-no-signoff-mention", func(t *testing.T) {
+		t.Parallel()
+		s := readClaudeMD(t, commentTriggerCtx)
+		// The anti-loop signal for CLAUDE.md lives in the numbered workflow
+		// steps (4 + 5), not in a dedicated preamble. Lock in the key phrases
+		// so the signal can't decay back into pure prose again.
+		for _, want := range []string{
+			"Decide whether a reply is warranted",
+			"Silence is a valid and preferred way",
+			"Never @mention the agent you are replying to as a thank-you or sign-off",
+		} {
+			if !strings.Contains(s, want) {
+				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
+			}
+		}
+	})
 }

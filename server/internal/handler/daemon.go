@@ -510,11 +510,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{"status": "ok"}
 
-	// Check for pending ping requests for this runtime.
-	if pending := h.PingStore.PopPending(req.RuntimeID); pending != nil {
-		resp["pending_ping"] = map[string]string{"id": pending.ID}
-	}
-
 	// Check for pending update requests for this runtime.
 	if pending := h.UpdateStore.PopPending(req.RuntimeID); pending != nil {
 		resp["pending_update"] = map[string]string{
@@ -529,12 +524,16 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for pending local-skill list requests for this runtime.
-	if pending := h.LocalSkillListStore.PopPending(req.RuntimeID); pending != nil {
+	if pending, err := h.LocalSkillListStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("local skill list PopPending failed", "error", err, "runtime_id", req.RuntimeID)
+	} else if pending != nil {
 		resp["pending_local_skills"] = map[string]string{"id": pending.ID}
 	}
 
 	// Check for pending local-skill import requests for this runtime.
-	if pending := h.LocalSkillImportStore.PopPending(req.RuntimeID); pending != nil {
+	if pending, err := h.LocalSkillImportStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("local skill import PopPending failed", "error", err, "runtime_id", req.RuntimeID)
+	} else if pending != nil {
 		payload := map[string]string{
 			"id":        pending.ID,
 			"skill_key": pending.SkillKey,
@@ -661,10 +660,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 		// Fetch the triggering comment content so the daemon can embed it
 		// directly in the agent prompt (prevents the agent from ignoring comments
-		// when stale output files exist in a reused workdir).
+		// when stale output files exist in a reused workdir). Also surface the
+		// comment author's kind and display name so the agent knows whether it
+		// was triggered by a human or by another agent — a signal used by the
+		// harness instructions to avoid mention loops between agents.
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				resp.TriggerAuthorType = comment.AuthorType
+				switch comment.AuthorType {
+				case "agent":
+					if comment.AuthorID.Valid {
+						if a, err := h.Queries.GetAgent(r.Context(), comment.AuthorID); err == nil {
+							resp.TriggerAuthorName = a.Name
+						}
+					}
+				case "member":
+					// For member-authored comments, AuthorID is a user UUID
+					// (see handler.resolveActor) — look up the user's display name.
+					if comment.AuthorID.Valid {
+						if u, err := h.Queries.GetUser(r.Context(), comment.AuthorID); err == nil {
+							resp.TriggerAuthorName = u.Name
+						}
+					}
+				}
 			}
 		}
 
@@ -1084,7 +1103,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		})
 
 		if workspaceID != "" {
-			h.publish(protocol.EventTaskMessage, workspaceID, "system", "", protocol.TaskMessagePayload{
+			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
 				TaskID:  taskID,
 				IssueID: uuidToString(task.IssueID),
 				Seq:     msg.Seq,

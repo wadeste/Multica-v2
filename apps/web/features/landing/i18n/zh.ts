@@ -144,6 +144,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     ],
     cta: "\u5f00\u59cb\u4f7f\u7528",
     ctaGithub: "\u5728 GitHub \u4e0a\u67e5\u770b",
+    ctaDocs: "\u9605\u8bfb\u6587\u6863",
   },
 
   openSource: {
@@ -232,7 +233,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       resources: {
         label: "\u8d44\u6e90",
         links: [
-          { label: "\u6587\u6863", href: githubUrl },
+          { label: "\u6587\u6863", href: "/docs/zh" },
           { label: "API", href: githubUrl },
           { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],
@@ -275,12 +276,38 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   changelog: {
     title: "\u66f4\u65b0\u65e5\u5fd7",
     subtitle: "Multica \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
+    toc: "\u5386\u53f2\u7248\u672c",
     categories: {
       features: "新功能",
       improvements: "改进",
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.2.15",
+        date: "2026-04-22",
+        title: "本地 Skills、LaTeX、Focus 模式与孤儿任务自恢复",
+        changes: [],
+        features: [
+          "支持将 Runtime 本地 Skills 导入工作区,成为一等工作区资产",
+          "孤儿任务自动恢复——意外中断的 Agent 执行会自动重试,必要时可手动重跑",
+          "Issue、评论与 Chat 支持 LaTeX 渲染",
+          "Chat Focus 模式——将当前页面作为上下文分享给对话",
+        ],
+        improvements: [
+          "子 Issue 的 `status_changed` 事件不再向父 Issue 订阅者刷屏",
+          "Docker 发布镜像改为按架构原生构建,免 QEMU",
+          "侧边栏 Pin 字段在客户端派生,排序更跟手",
+          "扩充保留 slug 列表,新工作区 slug 不会再和产品路由冲突",
+        ],
+        fixes: [
+          "Gemini Runtime 模型列表补上 Gemini 3 及若干 CLI 别名",
+          "没有锚点的页面上 Chat focus 按钮改为禁用",
+          "修复 Onboarding 中 Pin 同步、欢迎页布局与 Runtime bootstrap 状态",
+          "`install.ps1` 的系统架构探测更稳健,覆盖更多 Windows 环境",
+          "`/download` 在 1 小时新鲜度窗口内可回退到上一版本,避免撞上半发布状态",
+        ],
+      },
       {
         version: "0.2.11",
         date: "2026-04-21",
